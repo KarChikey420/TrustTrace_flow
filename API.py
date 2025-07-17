@@ -44,20 +44,16 @@ def clean_patent_data(df: pd.DataFrame) -> pd.DataFrame:
 def process_data(input_file: str) -> pd.DataFrame:
     """Process raw data and add traceability"""
     try:
-        # Read data (25k rows minimum)
         raw_df = pd.read_csv(input_file, nrows=25000, encoding='utf-8')
         logger.info(f"Read {len(raw_df)} rows from {input_file}")
         
-        # Clean the data
         cleaned_df = clean_patent_data(raw_df)
         
-        # Create patent number
         cleaned_df['patent_number'] = cleaned_df.apply(
             lambda row: f"{row['code']}{row['class'] or ''}{row['subclass'] or ''}{row['group'] or ''}/{row['main_group'] or ''}".rstrip('/'),
             axis=1
         )
-        
-        # Add source_fingerprint (SHA256 of input row)
+    
         cleaned_df['source_fingerprint'] = cleaned_df.apply(
             lambda row: hashlib.sha256(
                 json.dumps(row.to_dict(), sort_keys=True, default=str).encode()
@@ -65,7 +61,6 @@ def process_data(input_file: str) -> pd.DataFrame:
             axis=1
         )
         
-        # Add timestamp
         cleaned_df['ingestion_timestamp'] = datetime.utcnow()
         cleaned_df['source_file'] = input_file
         
@@ -77,7 +72,6 @@ def process_data(input_file: str) -> pd.DataFrame:
         raise
 
 def store_in_duckdb(df: pd.DataFrame):
-    #Store raw + cleaned data in DuckDB
     conn = duckdb.connect(database=DUCKDB_PATH)
     
     try:
@@ -99,7 +93,6 @@ def store_in_duckdb(df: pd.DataFrame):
         if 'group' in df.columns:
             df.rename(columns={'group': 'group_'}, inplace=True)
         
-        # Insert data
         conn.register('temp_df', df)
         conn.execute("""
         INSERT INTO patents_data
@@ -128,24 +121,18 @@ def store_in_duckdb(df: pd.DataFrame):
         conn.close()
 
 def index_in_chroma(df: pd.DataFrame):
-    # Embed selected text columns and store in vector DB
     try:
         model = SentenceTransformer(EMBEDDING_MODEL)
         
-        # Initialize ChromaDB
         chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
         
-        # Handle existing collection
         try:
-            # Delete existing collection if it exists
             chroma_client.delete_collection(name="patents")
         except:
-            pass  # Collection doesn't exist, that's fine
+            pass 
         
-        # Create new collection
         collection = chroma_client.create_collection(name="patents")
         
-        # Prepare documents (embed title text column)
         documents = df['title'].tolist()
         
         metadatas = []
@@ -158,7 +145,6 @@ def index_in_chroma(df: pd.DataFrame):
             }
             metadatas.append(metadata)
         
-        # Generate embeddings and store
         batch_size = 100
         for i in range(0, len(documents), batch_size):
             batch_docs = documents[i:i+batch_size]
@@ -184,7 +170,6 @@ def index_in_chroma(df: pd.DataFrame):
 async def startup_event():
     """Initialize the pipeline on startup"""
     try:
-        # Process and index data
         cleaned_df = process_data(PATENT_DATA_FILE)
         store_in_duckdb(cleaned_df)
         index_in_chroma(cleaned_df)
@@ -199,25 +184,20 @@ async def startup_event():
 async def search(query: SearchQuery):
     """Search route: accepts query, returns top 3 matching rows with source info and quality score"""
     try:
-        # Initialize ChromaDB and model
         chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
         collection = chroma_client.get_collection(name="patents")
         model = SentenceTransformer(EMBEDDING_MODEL)
         
-        # Embed query
         query_embedding = model.encode(query.query).tolist()
         
-        # Search for top 3 matches
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=3
         )
         
-        # Handle empty results
         if not results.get('documents') or not results['documents'][0]:
             return []
         
-        # Prepare response with required fields
         response = []
         docs = results['documents'][0]
         metadatas = results['metadatas'][0]
@@ -226,10 +206,8 @@ async def search(query: SearchQuery):
         for i in range(len(docs)):
             metadata = metadatas[i]
             
-            # Calculate quality score (similarity score from distance)
             quality_score = max(0, 1 - distances[i]) if distances and distances[i] is not None else 0.0
             
-            # Source info JSON object
             source_info = {
                 "source_file": metadata.get('source_file'),
                 "timestamp": datetime.utcnow().isoformat(),
