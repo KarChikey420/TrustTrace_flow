@@ -180,3 +180,40 @@ For questions or issues:
 - Check the logs for debugging information
 - Verify your CSV data format
 
+## 🚫 Failure Modes--
+
+ Failure Mode 1: ChromaDB Write Failure
+
+    Trigger: Disk full, corrupted ChromaDB folder, or client lock during .add() or .delete_collection().
+
+    Auto-remediation:
+    Fallback to in-memory Chroma collection and reattempt persistence on next run.
+
+ Failure Mode 2: Corrupted or Missing CSV Input
+
+    Trigger: titles.csv file not found, malformed rows, or incorrect encoding.
+
+    Auto-remediation:
+    Send Slack alert + skip ingestion; retry after backing up last known good input.
+
+ Failure Mode 3: Schema Drift in CSV
+
+    Trigger: Missing expected columns like title, code, class, or group.
+
+    Auto-remediation:
+    Log schema mismatch; quarantine file with timestamp and notify via webhook.
+
+ Failure Mode 4: DuckDB Write Conflict
+
+    Trigger: Concurrent writes or locked database file during INSERT INTO patents_data.
+
+    Auto-remediation:
+    Retry after short delay with exponential backoff; log write attempts in audit table.
+
+ Failure Mode 5: Model Embedding Crash
+
+    Trigger: SentenceTransformer model not loaded, incompatible input (e.g., null titles), or OOM error on batch.
+
+    Auto-remediation:
+    Catch and log model errors; skip problematic rows and continue indexing next batch.
+
